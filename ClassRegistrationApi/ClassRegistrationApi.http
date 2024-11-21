@@ -1,0 +1,6 @@
+#@ClassRegistrationApi_HostAddress = http://localhost:5001
+#
+#GET {{ClassRegistrationApi_HostAddress}}/weatherforecast/
+#Accept: application/json
+
+###
