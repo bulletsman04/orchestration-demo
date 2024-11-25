@@ -9,7 +9,8 @@
 
     <ItemGroup>
         <PackageReference Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.2.2" />
-        <PackageReference Include="MassTransit.SqlTransport.PostgreSQL" Version="8.3.1" />
+        <PackageReference Include="MassTransit.EntityFrameworkCore" Version="8.3.2" />
+        <PackageReference Include="MassTransit.SqlTransport.PostgreSQL" Version="8.3.2" />
         <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.11">
           <PrivateAssets>all</PrivateAssets>
           <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
