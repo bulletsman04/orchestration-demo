@@ -2,5 +2,5 @@ namespace Contracts;
 
 public class PaymentReminder
 {
-    public int RegistrationId { get; set; }
+    public Guid RegistrationId { get; set; }
 }

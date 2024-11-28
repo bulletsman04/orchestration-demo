@@ -3,7 +3,7 @@ using MassTransit;
 
 namespace ClassRegistrationWorker.StateMachines;
 
-// ToDo: NEXT STEP: schedule payment notification => ToDos => Refactor
+// ToDo: NEXT STEP: ToDos => Refactor
 
 // ToDo: To graph - visualize
 public class ClassRegistrationStateMachine : MassTransitStateMachine<ClassRegistrationState>
@@ -12,6 +12,8 @@ public class ClassRegistrationStateMachine : MassTransitStateMachine<ClassRegist
     private Request<ClassRegistrationState, BookSpot, SpotTempBooked> BookSpot { get; set; } = null!;
     private Request<ClassRegistrationState, RegisterPayment, PaymentRegistered> RegisterPayment { get; set; } = null!;
     private Request<ClassRegistrationState, ConfirmSpot, SpotConfirmed> ConfirmSpot { get; set; } = null!;
+    private Schedule<ClassRegistrationState, PaymentReminderSchedule> PaymentReminder { get; set; } = null!;
+
 
     public ClassRegistrationStateMachine()
     {
@@ -22,6 +24,11 @@ public class ClassRegistrationStateMachine : MassTransitStateMachine<ClassRegist
         Request(() => BookSpot, o => o.Timeout = TimeSpan.Zero);
         Request(() => RegisterPayment, o => o.Timeout = TimeSpan.Zero);
         Request(() => ConfirmSpot, o => o.Timeout = TimeSpan.Zero);
+        Schedule(() => PaymentReminder, instance => instance.PaymenRemindertTokenId, s =>
+        {
+            s.Delay = TimeSpan.FromDays(3);
+            s.Received = r => r.CorrelateById(context => context.Message.RegistrationId);
+        });
 
         During(Initial, When(NewRegistration).SaveRegistrationData().TransitionTo(Submitted));
         WhenEnter(Submitted, x => x
@@ -59,27 +66,30 @@ public class ClassRegistrationStateMachine : MassTransitStateMachine<ClassRegist
             When(RegisterPayment.Completed)
                 .SavePaymentData()
                 .NotifyThatRegistrationSucceededAndShouldBePaid()
-                .TransitionTo(AwaitingPayment), // ToDo: Schedule notification
+                .SchedulePaymentReminder(PaymentReminder)
+                .TransitionTo(AwaitingPayment),
             When(RegisterPayment.Faulted) // Unlikely to happen
                 .TransitionTo(Faulted)
         );
 
-
         During(AwaitingPayment,
             When(PaymentStatusUpdate)
-                // ToDo: Extract extension
                 .IfElse(context => context.Message.IsSuccessful,
                     then => then
                         .Request(ConfirmSpot, context => new ConfirmSpot(context.Saga.CorrelationId, context.Saga.ReservationId))
                         .TransitionTo(ConfirmSpot.Pending),
                     @else => @else.NotifyThatPaymentFailed())
+                .Unschedule(PaymentReminder),
+            When(PaymentReminder.Received).NotifyThatPaymentPending()
         );
 
         During(ConfirmSpot.Pending,
             When(ConfirmSpot.Completed)
                 .NotifyThatRegistrationIsCompleted()
-                .Then(c => c.GetServiceOrCreateInstance<ILogger<ClassRegistrationStateMachine>>().LogInformation("LOG: Student registration for class succeeded."))
-                .TransitionTo(Completed),
+                .Then(c => c.GetServiceOrCreateInstance<ILogger<ClassRegistrationStateMachine>>()
+                    .LogInformation("LOG: Student registration for class succeeded."))
+                .TransitionTo(Completed)
+                .Finalize(), // ToDo: Should we use it?
             When(ConfirmSpot.Faulted)
                 // We took money but couldn't complete registration. Let student decide (refund, another class, ...)
                 .TransitionTo(Faulted)
@@ -100,6 +110,8 @@ public class ClassRegistrationStateMachine : MassTransitStateMachine<ClassRegist
     public Event<NewRegistration> NewRegistration { get; private set; } = null!;
     public Event<PaymentStatusUpdate> PaymentStatusUpdate { get; private set; } = null!;
 }
+
+public record PaymentReminderSchedule(Guid RegistrationId);
 
 public record SpotConfirmed(Guid RegistrationId);
 
@@ -143,4 +155,5 @@ public class ClassRegistrationState :
 
     // If using Optimistic concurrency, this property is required
     public uint RowVersion { get; set; }
+    public Guid? PaymenRemindertTokenId { get; set; }
 }

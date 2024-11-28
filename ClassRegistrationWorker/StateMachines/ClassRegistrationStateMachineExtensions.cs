@@ -9,7 +9,7 @@ using ValidationFailedBinder = EventActivityBinder<ClassRegistrationState, Fault
 using ClassFullBinder = EventActivityBinder<ClassRegistrationState, Fault<BookSpot>>;
 using SpotConfirmedBinder = EventActivityBinder<ClassRegistrationState, SpotConfirmed>;
 using PaymentStatusUpdateBinder = EventActivityBinder<ClassRegistrationState, PaymentStatusUpdate>;
-
+using PaymentReminderBinder = EventActivityBinder<ClassRegistrationState, PaymentReminderSchedule>;
 
 public static class ClassRegistrationStateMachineExtensions
 {
@@ -34,7 +34,7 @@ public static class ClassRegistrationStateMachineExtensions
                 $"Class or student is not eligible for registration"
             )
         ));
-    
+
     public static ClassFullBinder NotifyThatClassIsFullyBooked(this ClassFullBinder binder)
         => binder.Then(context => context.Publish(new NotifyStudent(
                 context.Saga.CorrelationId,
@@ -42,7 +42,7 @@ public static class ClassRegistrationStateMachineExtensions
                 $"Class is already full. We put you on waitlist."
             )
         ));
-    
+
     public static PaymentRegisteredBinder NotifyThatRegistrationSucceededAndShouldBePaid(this PaymentRegisteredBinder binder)
         => binder.Then(context => context.Publish(new NotifyStudent(
                 context.Saga.CorrelationId,
@@ -50,7 +50,7 @@ public static class ClassRegistrationStateMachineExtensions
                 $"We received you registration. Please use this link to complete your registration: {context.Message.PaymentLink}"
             )
         ));
-    
+
     public static PaymentStatusUpdateBinder NotifyThatPaymentFailed(this PaymentStatusUpdateBinder binder)
         => binder.Then(context => context.Publish(new NotifyStudent(
                 context.Saga.CorrelationId,
@@ -58,7 +58,7 @@ public static class ClassRegistrationStateMachineExtensions
                 $"Payment failed for class {context.Saga.ClassId}"
             )
         ));
-    
+
     public static SpotConfirmedBinder NotifyThatRegistrationIsCompleted(this SpotConfirmedBinder binder)
         => binder.Then(context => context.Publish(new NotifyStudent(
                 context.Saga.CorrelationId,
@@ -66,4 +66,15 @@ public static class ClassRegistrationStateMachineExtensions
                 $"Payment successful for class {context.Saga.ClassId}"
             )
         ));
+
+    public static PaymentRegisteredBinder SchedulePaymentReminder(this PaymentRegisteredBinder binder,
+        Schedule<ClassRegistrationState, PaymentReminderSchedule> schedule)
+        => binder.Schedule(schedule, c => new PaymentReminderSchedule(c.Saga.CorrelationId), _ => TimeSpan.FromSeconds(30));
+
+    public static PaymentReminderBinder NotifyThatPaymentPending(this PaymentReminderBinder binder)
+        => binder.Then(context => context.Publish(new NotifyStudent(
+            context.Saga.CorrelationId,
+            "Payment reminder",
+            $"Payment for class {context.Saga.ClassId} is due. Payment link: {context.Saga.PaymentLink}"
+        )));
 }

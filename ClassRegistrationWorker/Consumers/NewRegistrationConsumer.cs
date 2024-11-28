@@ -84,7 +84,7 @@ public class NewRegistrationConsumer(
         // ToDo: use nameof?
         await context.ScheduleSend(new Uri("queue:PaymentReminder"), TimeSpan.FromDays(1), new PaymentReminder
         {
-            RegistrationId = classRegistration.Id
+            RegistrationId = classRegistration.RegistrationId
         }, context.CancellationToken);
     }
 }

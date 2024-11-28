@@ -15,7 +15,7 @@ public class PaymentReminderConsumer(
     {
         logger.LogInformation("Processing payment reminder for registration {RegistrationId}", context.Message.RegistrationId);
 
-        var classRegistration = await dbContext.ClassRegistrations.FirstOrDefaultAsync(x => x.Id == context.Message.RegistrationId, context.CancellationToken);
+        var classRegistration = await dbContext.ClassRegistrations.FirstOrDefaultAsync(x => x.RegistrationId == context.Message.RegistrationId, context.CancellationToken);
 
         if (classRegistration is null || classRegistration.IsCompleted)
         {
