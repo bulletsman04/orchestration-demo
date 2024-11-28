@@ -57,11 +57,11 @@ app.MapPost("/classes/registrations", async (ClassRegistrationRequest classRegis
 
 
 // Just to simulate payment
-app.MapPost("/payments/{paymentId:guid}", async (IPublishEndpoint publishEndpoint, Guid paymentId, CancellationToken ct) =>
+app.MapPost("/payments/{registrationId:guid}", async (IPublishEndpoint publishEndpoint, Guid registrationId, CancellationToken ct) =>
     {
         await publishEndpoint.Publish(new PaymentStatusUpdate
         {
-            PaymentId = paymentId,
+            RegistationId = registrationId,
             IsSuccessful = true
         }, ct);
 

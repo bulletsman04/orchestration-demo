@@ -1,9 +1,12 @@
 using System.ComponentModel.DataAnnotations;
 using ClassRegistrationWorker;
-using ClassRegistrationWorker.Consumers;
 using ClassRegistrationWorker.Services;
+using ClassRegistrationWorker.StateMachines;
+using ClassRegistrationWorker.StateMachines.RequestConsumers;
 using MassTransit;
+using MassTransit.EntityFrameworkCoreIntegration;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using ServiceDefaults;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -22,11 +25,36 @@ builder.Services.AddPostgresMigrationHostedService(options =>
     options.CreateDatabase = true;
 });
 
+// ToDo: Separate project for mass tranist
 builder.Services.AddMassTransit(x =>
 {
-    x.AddConsumer<NewRegistrationConsumer>();
-    x.AddConsumer<PaymentStatusUpdateConsumer>();
-    x.AddConsumer<PaymentReminderConsumer>();
+    // x.AddConsumer<NewRegistrationConsumer>();
+    // x.AddConsumer<PaymentStatusUpdateConsumer>();
+    // x.AddConsumer<PaymentReminderConsumer>();
+    // ToDo: auto register?
+    x.AddConsumer<ValidateRegistrationConsumer>();
+    x.AddConsumer<BookSpotConsumer>();
+    x.AddConsumer<RegisterPaymentConsumer>();
+    x.AddConsumer<NotifyStudentConsumer>();
+    x.AddConsumer<ConfirmSpotConsumer>();
+    
+    x.AddSagaStateMachine<ClassRegistrationStateMachine, ClassRegistrationState>()
+        .EntityFrameworkRepository(r =>
+        {
+            r.ConcurrencyMode = ConcurrencyMode.Optimistic; // or use Pessimistic, which does not require RowVersion
+
+            r.AddDbContext<DbContext, ClassesDbContext>((provider, builder) =>
+            {
+                builder.UseNpgsql(connectionString, m =>
+                {
+                    m.MigrationsAssembly(typeof(Program).Assembly.GetName().Name);
+                    m.MigrationsHistoryTable($"__{nameof(ClassesDbContext)}");
+                });
+            });
+
+            //This line is added to enable PostgreSQL features
+            r.UsePostgres();
+        });
 
     x.AddConfigureEndpointsCallback((provider, name, cfg) =>
     {
@@ -38,6 +66,8 @@ builder.Services.AddMassTransit(x =>
             // Prevents head-of-line blocking across customers
             sql.SetReceiveMode(SqlReceiveMode.PartitionedOrdered);
         }
+
+        cfg.UseInMemoryOutbox(provider);
     });
 
     x.AddSqlMessageScheduler();
@@ -50,9 +80,11 @@ builder.Services.AddMassTransit(x =>
         // cfg.UseSendFilter(typeof(CustomerNumberPartitionKeyFilter<>), context);
         cfg.ConfigureEndpoints(context);
     });
+
+    x.AddDbContext<ClassesDbContext>(x => x.UseNpgsql(connectionString));
 });
 
-builder.AddNpgsqlDbContext<ClassesDbContext>(connectionName: "classesdb");
+// builder.AddNpgsqlDbContext<ClassesDbContext>(connectionName: "classesdb");
 
 builder.Services.AddTransient<IPaymentService, PaymentService>();
 builder.Services.AddTransient<IEmailService, EmailService>();
@@ -78,18 +110,50 @@ namespace ClassRegistrationWorker
 {
     public class ClassesDbContext : DbContext
     {
-        public ClassesDbContext(DbContextOptions<ClassesDbContext> options) : base(options) {}
+        public ClassesDbContext(DbContextOptions<ClassesDbContext> options) : base(options)
+        {
+        }
+
         public DbSet<ClassRegistration> ClassRegistrations { get; set; }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+
+            foreach (var configuration in Configurations)
+                configuration.Configure(modelBuilder);
+        }
+
+        private IEnumerable<ISagaClassMap> Configurations
+        {
+            get { yield return new ClassRegistrationStateMap(); }
+        }
     }
 
     public class ClassRegistration
     {
         [Key] public int Id { get; set; }
+        public required Guid RegistrationId { get; set; } // ToDo: Index
         public required Guid StudentId { get; set; }
         public required Guid ClassId { get; set; }
         public required Guid PaymentId { get; set; }
         public required Guid ReservationId { get; set; }
-        
+
         public required bool IsCompleted { get; set; }
+    }
+
+    public class ClassRegistrationStateMap :
+        SagaClassMap<ClassRegistrationState>
+    {
+        protected override void Configure(EntityTypeBuilder<ClassRegistrationState> entity, ModelBuilder model)
+        {
+            entity.Property(x => x.CurrentState).HasMaxLength(64);
+
+            // If using Optimistic concurrency, otherwise remove this property
+            entity.Property(x => x.RowVersion)
+                .HasColumnName("xmin")
+                .HasColumnType("xid")
+                .IsRowVersion();
+        }
     }
 }

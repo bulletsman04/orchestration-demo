@@ -3,6 +3,7 @@ using System;
 using ClassRegistrationWorker;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ClassRegistrationWorker.Migrations
 {
     [DbContext(typeof(ClassesDbContext))]
-    partial class ClassesDbContextModelSnapshot : ModelSnapshot
+    [Migration("20241127164609_PaymentLinkOptional")]
+    partial class PaymentLinkOptional
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -37,9 +40,6 @@ namespace ClassRegistrationWorker.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<Guid>("PaymentId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("RegistrationId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("ReservationId")

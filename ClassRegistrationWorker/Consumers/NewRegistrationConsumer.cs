@@ -61,6 +61,7 @@ public class NewRegistrationConsumer(
 
         var classRegistration = new ClassRegistration
         {
+            RegistrationId = context.Message.RegistrationId,
             ClassId = context.Message.ClassId,
             StudentId = context.Message.StudentId,
             PaymentId = paymentResult.PaymentId,

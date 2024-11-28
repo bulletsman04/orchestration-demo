@@ -4,7 +4,7 @@ namespace ClassRegistrationWorker.Services;
 
 public class AvailabilityService(ILogger<AvailabilityService> logger) : IAvailabilityService
 {
-    public Task<ReservationResult> ReserveSpot(Guid classId, Guid studentId)
+    public Task<ReservationResult> ReserveSpot(Guid classId, Guid studentId) // ToDo: should this service know about class/student?
     {
         // in real app: call to availability service
 

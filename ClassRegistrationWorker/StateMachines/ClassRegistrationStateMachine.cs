@@ -3,43 +3,121 @@ using MassTransit;
 
 namespace ClassRegistrationWorker.StateMachines;
 
+// ToDo: NEXT STEP: schedule payment notification => ToDos => Refactor
+
+// ToDo: To graph - visualize
 public class ClassRegistrationStateMachine : MassTransitStateMachine<ClassRegistrationState>
 {
-    // Let's try first version without Routing Slip
+    private Request<ClassRegistrationState, ValidateRegistration, RegistrationValidated> ValidateRegistration { get; set; } = null!;
+    private Request<ClassRegistrationState, BookSpot, SpotTempBooked> BookSpot { get; set; } = null!;
+    private Request<ClassRegistrationState, RegisterPayment, PaymentRegistered> RegisterPayment { get; set; } = null!;
+    private Request<ClassRegistrationState, ConfirmSpot, SpotConfirmed> ConfirmSpot { get; set; } = null!;
+
     public ClassRegistrationStateMachine()
     {
         InstanceState(x => x.CurrentState);
-        // Event(() => RegistrationFaulted, x => x.CorrelateById(context => context.Message.RegistrationId));
         Event(() => NewRegistration, x => x.CorrelateById(context => context.Message.RegistrationId));
-        Event(() => PaymentStatusUpdate, x => x.CorrelateById(context => context.Message.PaymentId)); // ToDo: separate ID?
-        // Event(() => RegistrationFinalized, x => x.CorrelateById(context => context.Message.RegistrationId)); // ToDo: separate ID?
-        
-        During(Initial, When(NewRegistration).Then(x => Console.WriteLine("Save registration date.")).TransitionTo(Submitted));
-        WhenEnter(Submitted, x => x.Then(c => Console.WriteLine("Custom activity to validate data. If successful then")).TransitionTo(Validated));
-        WhenEnter(Validated, x => x.Then(c => Console.WriteLine("Try booking spot. If successful then transition to")).TransitionTo(SpotTempReserved));
-        WhenEnter(SpotTempReserved, x => x.Then(c => Console.WriteLine("Register payment and notify student")).TransitionTo(AwaitingPayment));
-        During(AwaitingPayment, When(PaymentStatusUpdate).Then(c => Console.WriteLine("Payment confirmed. Book spot.")).TransitionTo(Paid)); // ToDo: Schedule notification
-        WhenEnter(Paid, x => x.Then(c => Console.WriteLine("Spot booked. Notify student")).TransitionTo(Completed));
-        
-        // DuringAny(When(RegistrationFaulted).TransitionTo(Faulted)); // ToDo: DuringAny? when can it happen?
+        Event(() => PaymentStatusUpdate, x => x.CorrelateById(context => context.Message.RegistationId));
+        Request(() => ValidateRegistration, o => o.Timeout = TimeSpan.Zero);
+        Request(() => BookSpot, o => o.Timeout = TimeSpan.Zero);
+        Request(() => RegisterPayment, o => o.Timeout = TimeSpan.Zero);
+        Request(() => ConfirmSpot, o => o.Timeout = TimeSpan.Zero);
+
+        During(Initial, When(NewRegistration).SaveRegistrationData().TransitionTo(Submitted));
+        WhenEnter(Submitted, x => x
+            .Request(ValidateRegistration, context => new ValidateRegistration(context.Saga.CorrelationId, context.Saga.ClassId, context.Saga.StudentId))
+            .TransitionTo(ValidateRegistration.Pending));
+
+        During(ValidateRegistration.Pending,
+            When(ValidateRegistration.Completed)
+                .TransitionTo(Validated),
+            When(ValidateRegistration.Faulted)
+                .NotifyThatValidationFailed()
+                .TransitionTo(Faulted)
+        );
+
+        WhenEnter(Validated,
+            x => x
+                .Request(BookSpot, context => new BookSpot(context.Saga.CorrelationId, context.Saga.ClassId, context.Saga.StudentId))
+                .TransitionTo(BookSpot.Pending));
+
+        During(BookSpot.Pending,
+            When(BookSpot.Completed)
+                .Then(context => context.Saga.ReservationId = context.Message.ReservationId)
+                .TransitionTo(SpotTempReserved),
+            When(BookSpot.Faulted)
+                .NotifyThatClassIsFullyBooked()
+                .TransitionTo(Faulted)
+        );
+
+        WhenEnter(SpotTempReserved,
+            x => x
+                .Request(RegisterPayment, context => new RegisterPayment(context.Saga.CorrelationId))
+                .TransitionTo(RegisterPayment.Pending)); // Publishing command to PaymentService?
+
+        During(RegisterPayment.Pending,
+            When(RegisterPayment.Completed)
+                .SavePaymentData()
+                .NotifyThatRegistrationSucceededAndShouldBePaid()
+                .TransitionTo(AwaitingPayment), // ToDo: Schedule notification
+            When(RegisterPayment.Faulted) // Unlikely to happen
+                .TransitionTo(Faulted)
+        );
+
+
+        During(AwaitingPayment,
+            When(PaymentStatusUpdate)
+                // ToDo: Extract extension
+                .IfElse(context => context.Message.IsSuccessful,
+                    then => then
+                        .Request(ConfirmSpot, context => new ConfirmSpot(context.Saga.CorrelationId, context.Saga.ReservationId))
+                        .TransitionTo(ConfirmSpot.Pending),
+                    @else => @else.NotifyThatPaymentFailed())
+        );
+
+        During(ConfirmSpot.Pending,
+            When(ConfirmSpot.Completed)
+                .NotifyThatRegistrationIsCompleted()
+                .Then(c => c.GetServiceOrCreateInstance<ILogger<ClassRegistrationStateMachine>>().LogInformation("LOG: Student registration for class succeeded."))
+                .TransitionTo(Completed),
+            When(ConfirmSpot.Faulted)
+                // We took money but couldn't complete registration. Let student decide (refund, another class, ...)
+                .TransitionTo(Faulted)
+        );
+
+        WhenEnter(Faulted,
+            binder => binder.Then(
+                c => c.GetServiceOrCreateInstance<ILogger<ClassRegistrationStateMachine>>().LogError("Student registration for class failed.")));
     }
 
     public State Submitted { get; private set; } = null!;
     public State Validated { get; private set; } = null!;
     public State SpotTempReserved { get; private set; } = null!;
     public State AwaitingPayment { get; private set; } = null!;
-    public State Paid { get; private set; } = null!;
     public State Faulted { get; private set; } = null!;
     public State Completed { get; private set; } = null!; // ToDo: Or initial?
 
     public Event<NewRegistration> NewRegistration { get; private set; } = null!;
     public Event<PaymentStatusUpdate> PaymentStatusUpdate { get; private set; } = null!;
-    // public Event<RegistrationFinalized> RegistrationFinalized { get; private set; } = null!;
-    
-    // public Event<RegistrationFaulted> RegistrationFaulted { get; private set; } = null!;
-
-
 }
+
+public record SpotConfirmed(Guid RegistrationId);
+
+public record ConfirmSpot(Guid RegistrationId, Guid ReservationId);
+
+public record NotifyStudent(Guid RegistrationId, string Subject, string Body);
+
+public record RegisterPayment(Guid RegistrationId);
+
+public record PaymentRegistered(Guid RegistrationId, Guid PaymentId, Uri PaymentLink);
+
+public record SpotTempBooked(Guid RegistrationId, Guid ReservationId);
+
+public record BookSpot(Guid RegistrationId, Guid ClassId, Guid StudentId);
+
+public record RegistrationValidated(Guid RegistrationId);
+
+public record ValidateRegistration(Guid RegistrationId, Guid ClassId, Guid StudentId);
 
 public class RegistrationFaulted
 {
@@ -60,6 +138,7 @@ public class ClassRegistrationState :
     public required Guid StudentId { get; set; }
     public required Guid ClassId { get; set; }
     public required Guid PaymentId { get; set; }
+    public required Uri? PaymentLink { get; set; }
     public required Guid ReservationId { get; set; }
 
     // If using Optimistic concurrency, this property is required
